@@ -1,0 +1,153 @@
+nmcli connection modify ens33  ipv4.address 192.168.25.101/24 ipv4.gateway 192.168.25.254 ipv4.dns 192.168.25.254 ipv4.method manual connection.autoconnect yes
+
+#查看当前路由器的用户配置
+display this
+
+#进入某个网口
+interface 网口类型 网口编号
+例如：interface g 0/0/0
+
+#路由器 开启dhcp 动态主机配置协议
+dhcp enable
+dhcp slelect interface
+
+#路由器设置dns服务器
+dhcp server dns-list dns服务器ip地址
+
+#查看网口+ip配置信息
+display ip interface brief
+
+#查看所有网口配置信息
+display interface brief
+
+#查看路由表
+display ip routing-table [目标ip]
+
+#添加静态路由路径
+ip route-static 目标网段 目标网段mark 下一条IP地址
+
+#vlan知识
+vlan用于划分虚拟局域网络，例如可以将一台交换机划分成若干个网络，网络间网络隔离，保证安全
+vlan端口的两种类型：
+access：用于连接终端设备，如pc、打印机等
+trunck：用于连接其他交换机（设置trunk，在给该端口发数据包时，会自动加上vlan标记）
+
+#查看所有vlan
+display vlan
+
+#创建vlan
+vlan vlan编号
+如vlan 10
+
+#vlan设置端口类型
+port link-type access(需要进入网口后再设置)
+
+#设置端口所属vlan
+port defualt vlan 10
+
+#交换机允许指定vlan通过
+port trunk allow-pass vlan vlan编号/all 
+
+#单臂路由实现不同vlan之间访问核心命令
+#创建并进入子接口
+interface g0/0/0.子接口编号
+例如 interface g0/0/0.10
+#子接口使用dot1q协议封装并关联vlan 10
+dot1q termination vid 10 
+#给子接口配置ip地址，该地址作为vlan下终端设备的网关
+ip address 1.1.1.254 255.255.255.0 
+#开启arp 广播
+arp broadcast enable
+
+#三层交换机实现不同vlan间的访问 核心命令
+三层交换机也创建vlan10和vlan20，同时给对应vlan设置对应ip
+给终端设备的网关地址设置三层交换机对应vlan的ip地址
+请求时，数据包先到三层交换机，三层交换机在根据数据包所标识的vlan号(trunck)，来转发到目标vlan
+
+
+#acl
+#acl编号
+INTEGER<2000-2999>  Basic access-list(add to current using rules) 只支持设置源ip
+INTEGER<3000-3999>  Advanced access-list(add to current using rules) 重要：设置设置源ip、源端口、目标ip、目标端口的设置，即支持ip和tcp、udp的acl设置
+INTEGER<4000-4999>  Specify a L2 acl group
+INTEGER<5000-5999>  User defined access-list
+#创建acl并进入
+acl acl编号(根据要创建的acl规则类型来选择对应的acl编号)
+如 acl 3000
+#创建acl规则(需要在指定acl里面操作)，注意 这里要使用反子网掩码
+rule deny ip source 1.1.1.0 0.0.0.255 destination 3.3.3.0 0.0.0.255
+#将acl作用在网口上(先进入某个网口，如g0/0/0)
+如 traffic-filter inbound acl 3000
+
+
+#nat网络地址转换(内网访问外网)
+#1、路由器定义nat地址组(内网ip经转换后，会使用地址组中的其中一个地址)
+nat address-group 组编号 开始IP地址 结束ip地址(注意：ip地址不能和已有地址冲突)
+例如：nat address-group 1 1.1.1.100 1.1.1.110
+#2、定义要需要nat处理的acl规则
+[Huawei]acl 2000
+[Huawei-acl-basic-2000]rule permit source 192.168.1.0 0.0.0.255
+#3、将规则运用到相关网口
+[Huawei-GigabitEthernet0/0/1]nat outbound 2000 address-group 1
+
+#nat网络地址转换(外网访问内网的服务器)
+nat server global 给外部访问的公网地址 inside 内部的服务器地址(注意：ip地址不能和已有地址冲突)
+nat server global 1.1.1.3 inside 192.168.1.1
+
+#OSPF配置(动态路由协议：Open Shortest Path First开放式最短路径优先)
+3个流程：1建立邻居表、2根据链路状态信息lsa完善链路状态数据库(lsdb)、3最终计算路由规则
+5种报文：1 hello包(用于建立和维护邻居关系)、2 DataBase Description(用于告知本地lsdb情况的摘要信息，用于让对方快速找出其缺少部分)、
+		3 Link State Request(向对方请求当前需要的LSA)、4 Link State Update：向对方发送其所需的LSA
+		5 Link State ACK（用来对收到的LSA进行确认）
+		
+#1、创建并进入指定ospf
+ospf 进程ID router-id 路由ID
+例如：ospf 1 router-id 100.100.100.100
+#2、设置并进入区域(需要先进入ospf)
+area 区域号
+例如：area 0
+#3、告知当前路由器接口关联的网络
+network 当前网络号 反子网掩码
+例如：network 1.1.1.0 0.0.0.255
+例如：network 2.2.2.0 0.0.0.255
+#4、查看邻居表
+display ospf peer brief
+#5、查看连接lsdb(包含了所有邻接信息)
+display ip routing-table protocol ospf
+
+链路聚合eth-trunk (lacp模式：自动选择和协商两个交换机中间的接口连接)
+#1、设置并进入eth-trunk
+interface Eth-Trunk 编号
+例如：interface Eth-Trunk 1
+#2、设置eth-trunk使用lacp模式(需要先进入 eth-trunk)
+mode lacp
+#3、虚拟接口关联多个物理接口(即把多个物理接口聚合成一个虚拟的接口)
+trunkport GigabitEthernet 物理端口集合
+例如：trunkport GigabitEthernet 0/0/1 to 0/0/3
+#4、设置最大活跃链路数(虚拟接口关联的物理接口数 - 最大活跃链路数 = 备用链路数)
+max active-linknumber 2
+#5、设置lacp模式的主动段(其中一台交换机去设置，主动端负责双方交换机端口的配置、设定)
+lacp priority 优先级值(默认2768)
+例如：lacp priority 3000
+#查看聚合接口信息
+display interface Eth-Trunk 编号
+例如：display interface Eth-Trunk 1
+可以看到如下内容：
+Line protocol current state : UP
+Description:
+Switch Port, PVID :    1, Hash arithmetic : According to SIP-XOR-DIP,Maximal BW:
+ 3G, Current BW: 2G, The Maximum Frame Length is 9216
+IP Sending Frames' Format is PKTFMT_ETHNT_2, Hardware address is 4c1f-cc9d-2b20
+Current system time: 2024-10-07 12:48:25-08:00
+    Input bandwidth utilization  :    0%
+    Output bandwidth utilization :    0%
+-----------------------------------------------------
+PortName                      Status      Weight
+-----------------------------------------------------
+GigabitEthernet0/0/1          UP          1
+GigabitEthernet0/0/2          UP          1
+GigabitEthernet0/0/3          DOWN        1
+-----------------------------------------------------
+The Number of Ports in Trunk : 3
+The Number of UP Ports in Trunk : 2
+
